@@ -10,6 +10,39 @@ const EMAILJS_TEMPLATE_ID = "YOUR_EMAILJS_TEMPLATE_ID"; // TODO: Replace with yo
 const CALLMEBOT_PHONE  = "27620555123456"; // TODO: Replace with your WhatsApp number (country code, no + or 0)
 const CALLMEBOT_APIKEY = "YOUR_CALLMEBOT_APIKEY"; // TODO: Replace with your CallMeBot API key
 
+/* BRS Connector - real PDF generation & dashboard logging (best-effort, additive) */
+/* The site keeps working exactly as before even if this service is offline. */
+const BRS_CONNECTOR_URL = "https://YOUR-VERCEL-APP.vercel.app/api/enquiry"; // TODO: set after connector deploys
+
+/* Forward an enquiry to the BRS PDF engine. Never blocks or breaks the form. */
+async function sendToBrsConnector(payload) {
+    if (!BRS_CONNECTOR_URL || BRS_CONNECTOR_URL.includes("YOUR-VERCEL-APP")) {
+        return; // connector not deployed yet - behave exactly as before
+    }
+    try {
+        await fetch(BRS_CONNECTOR_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        console.log("Enquiry forwarded to BRS connector.");
+    } catch (err) {
+        console.warn("BRS connector unreachable - enquiry still saved locally:", err);
+    }
+}
+
+/* Current estimate total (R) if the user generated one, else null. */
+function currentEstimateTotal() {
+    try {
+        const raw = estimateTotal && estimateTotal.textContent;
+        if (!raw) return null;
+        const num = parseFloat(String(raw).replace(/[^0-9.]/g, ""));
+        return isNaN(num) ? null : num;
+    } catch (e) {
+        return null;
+    }
+}
+
 // Initialize EmailJS if available
 if (window.emailjs) {
     emailjs.init(EMAILJS_PUBLIC_KEY);
@@ -433,6 +466,20 @@ async function submitAsEnquiry() {
         });
         localStorage.setItem("brs_enquiries", JSON.stringify(existing));
 
+        // Forward to BRS connector: real branded PDF + dashboard log (best-effort)
+        sendToBrsConnector({
+            source: "quotation-agent",
+            ref: refNumber,
+            service: serviceType,
+            area: area,
+            dimensions: dimensions,
+            quality: quality,
+            details: details || "",
+            client_name: clientName,
+            client_contact: clientContact,
+            estimated_total: currentEstimateTotal()
+        });
+
         // Show success
         submitEnquiryBtn.disabled = false;
         submitEnquiryBtn.textContent = 'Send as Enquiry';
@@ -535,6 +582,17 @@ async function processEnquiry(formData, submitBtn) {
             submittedAt: new Date().toISOString()
         });
         localStorage.setItem("brs_enquiries", JSON.stringify(existing));
+
+        // Forward to BRS connector: real branded PDF + dashboard log (best-effort)
+        sendToBrsConnector({
+            source: "new-enquiry",
+            ref: refNumber,
+            service: formData.service,
+            area: formData.area,
+            details: formData.details || "",
+            client_name: formData.name,
+            client_contact: formData.contact
+        });
 
         // Reset form and show success
         submitBtn.disabled = false;
